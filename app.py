@@ -36,18 +36,24 @@ st.sidebar.caption(f"Range: {low} to {high}")
 st.sidebar.caption(f"Attempts allowed: {attempt_limit}")
 
 
-def start_new_round():
+def start_new_round(reset_high_score=False):
     """Reset all per-round state using the current difficulty range."""
     st.session_state.secret = random.randint(low, high)
     st.session_state.attempts = 0
     st.session_state.score = 0
     st.session_state.status = "playing"
     st.session_state.history = []
+    if reset_high_score:
+        st.session_state.high_score = 0
 
 
 # Initialise session state on first load. New Game reuses start_new_round().
 if "secret" not in st.session_state:
     start_new_round()
+
+# High score persists across rounds (Stretch: High Score tracker).
+if "high_score" not in st.session_state:
+    st.session_state.high_score = 0
 
 st.subheader("Make a guess")
 
@@ -56,6 +62,11 @@ st.info(
     f"Guess a number between {low} and {high}. "
     f"Attempts left: {attempts_left}"
 )
+
+# High score banner (Stretch: High Score tracker / Enhanced UI).
+hs_col, score_col = st.columns(2)
+hs_col.metric("🏆 High Score", st.session_state.high_score)
+score_col.metric("⭐ Current Score", st.session_state.score)
 
 with st.expander("Developer Debug Info"):
     st.write("Secret:", st.session_state.secret)
@@ -89,6 +100,21 @@ if st.session_state.status != "playing":
         st.error("Game over. Start a new game to try again.")
     st.stop()
 
+
+def hot_or_cold(distance, span):
+    """Return an emoji 'temperature' for how close a guess is (Enhanced UI)."""
+    ratio = distance / span if span else 0
+    if distance == 0:
+        return "🎯 Bullseye!"
+    if ratio <= 0.05:
+        return "🔥 Burning hot"
+    if ratio <= 0.15:
+        return "🌡️ Warm"
+    if ratio <= 0.35:
+        return "❄️ Cold"
+    return "🧊 Freezing"
+
+
 if submit:
     ok, guess_int, err = parse_guess(raw_guess)
 
@@ -103,6 +129,10 @@ if submit:
 
         if show_hint:
             st.warning(hint_message(outcome))
+            if outcome != "Win":
+                st.caption(
+                    hot_or_cold(abs(guess_int - secret), high - low)
+                )
 
         st.session_state.score = update_score(
             current_score=st.session_state.score,
@@ -110,11 +140,22 @@ if submit:
             attempt_number=st.session_state.attempts,
         )
 
-        st.session_state.history.append(guess_int)
+        # Record this guess for the session summary table.
+        st.session_state.history.append(
+            {
+                "Attempt": st.session_state.attempts,
+                "Guess": guess_int,
+                "Result": outcome,
+                "Score": st.session_state.score,
+            }
+        )
 
         if outcome == "Win":
             st.balloons()
             st.session_state.status = "won"
+            st.session_state.high_score = max(
+                st.session_state.high_score, st.session_state.score
+            )
             st.success(
                 f"You won! The secret was {st.session_state.secret}. "
                 f"Final score: {st.session_state.score}"
@@ -126,6 +167,11 @@ if submit:
                 f"The secret was {st.session_state.secret}. "
                 f"Score: {st.session_state.score}"
             )
+
+# Session summary table (Enhanced UI / Guess History).
+if st.session_state.history:
+    st.subheader("📜 Guess History")
+    st.table(st.session_state.history)
 
 st.divider()
 st.caption("Debugged by a human who reads the code. 🕵️")
