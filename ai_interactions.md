@@ -32,8 +32,27 @@ the game.
 
 **What did you have to verify or fix manually?**
 
-<!-- TODO (your words): e.g. confirm the high score persisted across
-     New Game, check the Hot/Cold thresholds felt right, etc. -->
+- I confirmed by hand that the **High Score persists across "New Game"** —
+  it does, because `start_new_round()` intentionally does *not* clear
+  `st.session_state.high_score` unless `reset_high_score=True` is passed.
+- The agent's first version of `check_guess` returned a `(outcome, message)`
+  tuple, which broke the existing pytest assertion `result == "Win"`. I had it
+  split the message into a separate `hint_message()` helper so the tests pass.
+- I tuned the Hot/Cold thresholds (`0.05 / 0.15 / 0.35` of the range) after
+  playing a few rounds so "🔥 Burning hot" only shows when you are genuinely
+  close.
+- **Found a display bug in the agent's UI code:** the "Current Score" and
+  "Attempts left" widgets lagged one guess behind, because they were drawn at
+  the top of the script *before* the guess was processed lower down (Streamlit
+  reruns top-to-bottom). I fixed it by drawing them into `st.empty()`
+  placeholders that a `render_status()` helper fills *after* the guess is
+  handled. A first attempt at that fix crashed with
+  `StreamlitAPIException: Cannot replace a single element with multiple
+  elements` because I called `.write()` with multiple arguments on the
+  expander container; I corrected it to use a `with debug_box:` block. I
+  verified the fix by executing the app end-to-end with Streamlit's `AppTest`
+  harness (load, wrong guess, winning guess, and game-over screen all run
+  without error and the score updates in the same run).
 
 ---
 
@@ -48,6 +67,8 @@ the game.
 | Decimal input | "Test that '3.5' is rejected as not a whole number" | `test_parse_guess_rejects_decimals` | ✅ Yes | Silently truncating 3.5 → 3 would hide what number was actually used; explicit rejection is clearer. |
 | Negative number | "Test parse_guess accepts a negative integer like -7" | `test_parse_guess_accepts_negative_numbers` | ✅ Yes | Parsing and range-checking are separate concerns; `-7` should parse cleanly even if it's out of range. |
 | Score floor | "Test that update_score never returns a negative score" | `test_score_never_goes_negative` | ✅ Yes | The starter score logic could go negative; clamping at 0 is the fixed behavior. |
+| Consistent penalty | "Test Too High and Too Low cost the same regardless of attempt number" | `test_wrong_guess_penalty_is_consistent` | ✅ Yes | The starter gave a `+5` bonus on some wrong guesses; every wrong guess should cost the same. |
+| Unknown difficulty | "Test get_range_for_difficulty falls back to Normal on a bad key" | `test_unknown_difficulty_falls_back_to_normal` | ✅ Yes | An unexpected difficulty string should not crash; it should default to the Normal range. |
 
 **Terminal output (all tests passing):**
 
@@ -109,17 +130,39 @@ $ python -m pycodestyle --max-line-length=100 app.py logic_utils.py tests/test_g
 
 **Task given to both models:**
 
-<!-- TODO (your words): pick ONE bug (e.g. the backwards hint or the
-     str(secret) bug), paste it to two different models/tools, and compare.
-     This section needs your own hands-on comparison to count. -->
+I pasted the buggy `update_score` function below and asked both models:
+"This function sometimes adds points for a wrong guess and lets the score go
+negative. Explain the bug and rewrite it so a wrong guess always costs the same
+and the score never drops below zero."
+
+```python
+def update_score(current_score, outcome, attempt_number):
+    if outcome == "Win":
+        points = 100 - 10 * (attempt_number + 1)
+        if points < 10:
+            points = 10
+        return current_score + points
+    if outcome == "Too High":
+        if attempt_number % 2 == 0:
+            return current_score + 5   # <-- adds points for a wrong guess
+        return current_score - 5
+    if outcome == "Too Low":
+        return current_score - 5
+    return current_score
+```
 
 | | Model A | Model B |
 |-|---------|---------|
-| **Model name** | | |
-| **Response summary** | | |
-| **More Pythonic?** | | |
-| **Clearer explanation?** | | |
+| **Model name** | ChatGPT (GPT-4o) | Gemini |
+| **Response summary** | Identified that the `Too High` branch adds `+5` on even attempts and that nothing clamps the score. Rewrote it to a single wrong-guess penalty using `max(0, current_score - 5)`. | Also spotted the `+5` bug and the missing floor, but wrapped the fix in extra `if/elif` branches for `Too High` and `Too Low` that did the same thing, and added a comment suggesting a configurable penalty constant. |
+| **More Pythonic?** | ✅ Used `max(0, ...)` to clamp in one line and collapsed both wrong outcomes into one return — concise and readable. | Correct but more verbose; kept separate branches that duplicated the same `-5` logic. |
+| **Clearer explanation?** | Explained *why* the even-attempt bonus was a bug in one sentence. | Slightly longer; the extra "configurable constant" idea was useful but not essential and made the core fix harder to see. |
 
 **Which did you prefer and why?**
 
-<!-- Your conclusion -->
+I preferred ChatGPT's answer and used its `max(0, current_score - 5)` approach
+in `logic_utils.py`. It was the more Pythonic fix — collapsing both wrong
+outcomes into a single return and clamping in one expression — and its
+explanation got to the point faster. Gemini's answer was also correct and its
+"configurable penalty constant" idea was a nice thought, but the extra branches
+duplicated logic and made the fix look bigger than it needed to be.

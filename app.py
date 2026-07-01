@@ -57,23 +57,42 @@ if "high_score" not in st.session_state:
 
 st.subheader("Make a guess")
 
-attempts_left = attempt_limit - st.session_state.attempts
-st.info(
-    f"Guess a number between {low} and {high}. "
-    f"Attempts left: {attempts_left}"
-)
+# These placeholders are created here (top of the page) but filled in *after*
+# the guess is processed, via render_status(). Streamlit reruns the whole
+# script top-to-bottom on every click, so writing the score/attempts here
+# directly would show the values from *before* the current guess (a
+# one-guess-behind lag). Filling placeholders after processing fixes that.
+info_box = st.empty()
 
 # High score banner (Stretch: High Score tracker / Enhanced UI).
 hs_col, score_col = st.columns(2)
-hs_col.metric("🏆 High Score", st.session_state.high_score)
-score_col.metric("⭐ Current Score", st.session_state.score)
+hs_metric = hs_col.empty()
+score_metric = score_col.empty()
 
-with st.expander("Developer Debug Info"):
-    st.write("Secret:", st.session_state.secret)
-    st.write("Attempts:", st.session_state.attempts)
-    st.write("Score:", st.session_state.score)
-    st.write("Difficulty:", difficulty)
-    st.write("History:", st.session_state.history)
+debug_box = st.expander("Developer Debug Info")
+
+
+def render_status():
+    """Fill the status placeholders with the *current* session state.
+
+    Called after a guess is processed (and on the game-over screen) so the
+    displayed score, high score, and attempts-left always reflect the latest
+    guess rather than the previous one.
+    """
+    attempts_left = attempt_limit - st.session_state.attempts
+    info_box.info(
+        f"Guess a number between {low} and {high}. "
+        f"Attempts left: {attempts_left}"
+    )
+    hs_metric.metric("🏆 High Score", st.session_state.high_score)
+    score_metric.metric("⭐ Current Score", st.session_state.score)
+    with debug_box:
+        st.write("Secret:", st.session_state.secret)
+        st.write("Attempts:", st.session_state.attempts)
+        st.write("Score:", st.session_state.score)
+        st.write("Difficulty:", difficulty)
+        st.write("History:", st.session_state.history)
+
 
 raw_guess = st.text_input(
     "Enter your guess:",
@@ -98,6 +117,7 @@ if st.session_state.status != "playing":
         st.success("You already won. Start a new game to play again.")
     else:
         st.error("Game over. Start a new game to try again.")
+    render_status()
     st.stop()
 
 
@@ -167,6 +187,10 @@ if submit:
                 f"The secret was {st.session_state.secret}. "
                 f"Score: {st.session_state.score}"
             )
+
+# Refresh the status widgets so score / high score / attempts-left reflect
+# the guess that was just processed (not the previous one).
+render_status()
 
 # Session summary table (Enhanced UI / Guess History).
 if st.session_state.history:
